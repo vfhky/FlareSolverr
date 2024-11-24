@@ -1,3 +1,5 @@
+from pydantic import BaseModel
+
 
 STATUS_OK = "ok"
 STATUS_ERROR = "error"
@@ -26,7 +28,7 @@ class ChallengeResolutionT:
             self.result = ChallengeResolutionResultT(self.result)
 
 
-class V1RequestBase(object):
+class V1RequestBase(BaseModel):
     # V1RequestBase
     cmd: str = None
     cookies: list = None
@@ -35,7 +37,7 @@ class V1RequestBase(object):
     session: str = None
     session_ttl_minutes: int = None
     headers: list = None  # deprecated v2.0.0, not used
-    userAgent: str = None  # deprecated v2.0.0, not used
+    userAgent: str = None
 
     # V1Request
     url: str = None
@@ -44,8 +46,8 @@ class V1RequestBase(object):
     download: bool = None   # deprecated v2.0.0, not used
     returnRawHtml: bool = None  # deprecated v2.0.0, not used
 
-    def __init__(self, _dict):
-        self.__dict__.update(_dict)
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
 
 
 class V1ResponseBase(object):

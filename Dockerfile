@@ -1,4 +1,4 @@
-FROM python:3.11-slim-bullseye as builder
+FROM debian:bullseye-slim AS builder
 
 # Build dummy packages to skip installing them and their dependencies
 RUN apt-get update \
@@ -10,41 +10,60 @@ RUN apt-get update \
     && equivs-control adwaita-icon-theme \
     && printf 'Section: misc\nPriority: optional\nStandards-Version: 3.9.2\nPackage: adwaita-icon-theme\nVersion: 99.0.0\nDescription: Dummy package for adwaita-icon-theme\n' >> adwaita-icon-theme \
     && equivs-build adwaita-icon-theme \
-    && mv adwaita-icon-theme_*.deb /adwaita-icon-theme.deb
+    && mv adwaita-icon-theme_*.deb /adwaita-icon-theme.deb \
+    && apt-get purge -y --auto-remove equivs \
+    && rm -rf /var/lib/apt/lists/*
 
-FROM python:3.11-slim-bullseye
+# Add a build stage for Python packages
+FROM debian:bullseye-slim AS python-builder
 
-# Copy dummy packages
+WORKDIR /build
+COPY requirements.txt .
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        python3 \
+        python3-pip \
+        python3-dev \
+        build-essential \
+        libxml2-dev \
+        libxslt-dev \
+    && pip3 wheel --no-cache-dir -r requirements.txt -w /wheels \
+    && rm -rf /root/.cache /var/lib/apt/lists/*
+
+FROM debian:bullseye-slim
+
+# Copy dummy packages and pre-built wheels
 COPY --from=builder /*.deb /
+COPY --from=python-builder /wheels /wheels
 
-# Install dependencies and create flaresolverr user
-# You can test Chromium running this command inside the container:
-#    xvfb-run -s "-screen 0 1600x1200x24" chromium --no-sandbox
-# The error traces is like this: "*** stack smashing detected ***: terminated"
-# To check the package versions available you can use this command:
-#    apt-cache madison chromium
 WORKDIR /app
-    # Install dummy packages
-RUN dpkg -i /libgl1-mesa-dri.deb \
+COPY requirements.txt .
+
+# Install dummy packages and system dependencies
+RUN apt-get update \
+    && dpkg -i /libgl1-mesa-dri.deb \
     && dpkg -i /adwaita-icon-theme.deb \
-    # Install dependencies
-    && apt-get update \
-    && apt-get install -y --no-install-recommends chromium chromium-common chromium-driver xvfb dumb-init \
-        procps curl vim xauth \
-    # Remove temporary files and hardware decoding libraries
+    && apt-get install -f \
+    && apt-get install -y --no-install-recommends \
+        chromium \
+        xvfb \
+        dumb-init \
+        procps \
+        curl \
+        vim \
+        xauth \
+        python3 \
+        python3-pip \
+        libxml2 \
+        libxslt1.1 \
     && rm -rf /var/lib/apt/lists/* \
     && rm -f /usr/lib/x86_64-linux-gnu/libmfxhw* \
     && rm -f /usr/lib/x86_64-linux-gnu/mfx/* \
-    # Create flaresolverr user
     && useradd --home-dir /app --shell /bin/sh flaresolverr \
-    && mv /usr/bin/chromedriver chromedriver \
-    && chown -R flaresolverr:flaresolverr .
-
-# Install Python dependencies
-COPY requirements.txt .
-RUN pip install -r requirements.txt \
-    # Remove temporary files
-    && rm -rf /root/.cache
+    && chown -R flaresolverr:flaresolverr . \
+    && pip3 install --no-index --find-links=/wheels -r requirements.txt \
+    && rm -rf /root/.cache /wheels /tmp/*
 
 USER flaresolverr
 
@@ -59,20 +78,4 @@ EXPOSE 8192
 # dumb-init avoids zombie chromium processes
 ENTRYPOINT ["/usr/bin/dumb-init", "--"]
 
-CMD ["/usr/local/bin/python", "-u", "/app/flaresolverr.py"]
-
-# Local build
-# docker build -t ngosang/flaresolverr:3.3.21 .
-# docker run -p 8191:8191 ngosang/flaresolverr:3.3.21
-
-# Multi-arch build
-# docker run --rm --privileged multiarch/qemu-user-static --reset -p yes
-# docker buildx create --use
-# docker buildx build -t ngosang/flaresolverr:3.3.21 --platform linux/386,linux/amd64,linux/arm/v7,linux/arm64/v8 .
-#   add --push to publish in DockerHub
-
-# Test multi-arch build
-# docker run --rm --privileged multiarch/qemu-user-static --reset -p yes
-# docker buildx create --use
-# docker buildx build -t ngosang/flaresolverr:3.3.21 --platform linux/arm/v7 --load .
-# docker run -p 8191:8191 --platform linux/arm/v7 ngosang/flaresolverr:3.3.21
+CMD ["/usr/bin/python3", "-u", "/app/flaresolverr.py"]
